@@ -1,0 +1,82 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Services
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+
+  # ── Backend: FastAPI ────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rag-backend
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - chroma_data:/data/chroma     # ChromaDB persists here between restarts
+    depends_on:
+      ollama:
+        condition: service_started   # remove this block if using OpenAI only
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - rag-network
+
+  # ── Frontend: React + Nginx ─────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: rag-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"       # Access app at http://localhost:3000
+    depends_on:
+      - backend
+    networks:
+      - rag-network
+
+  # ── Optional: Ollama local LLM ──────────────────────────────────────────────
+  # Remove this service entirely if you're using OpenAI.
+  # If you have an NVIDIA GPU, uncomment the deploy block below.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: rag-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama    # downloaded models persist here
+    networks:
+      - rag-network
+    # Uncomment for GPU support:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Volumes — persist data outside container lifecycle
+# ─────────────────────────────────────────────────────────────────────────────
+volumes:
+  chroma_data:     # ChromaDB vector store
+    driver: local
+  ollama_data:     # Ollama model weights
+    driver: local
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Networks
+# ─────────────────────────────────────────────────────────────────────────────
+networks:
+  rag-network:
+    driver: bridge
